@@ -493,29 +493,44 @@ ${ctx}
       if (cleaned.length===0 || cleaned[cleaned.length-1].role!==msg.role) cleaned.push(msg);
     }
     if (cleaned.length>0 && cleaned[cleaned.length-1].role==="model") cleaned.pop();
-    cleaned.push({role:"user",parts:[{text:userText}]});
+
+    // 카드 컨텍스트: Gemini 요청 크기 제한 대응 (최대 8000자)
+    const ctxTrimmed = ctx.length > 8000 ? ctx.slice(0, 8000) + "\n...(이하 생략)" : ctx;
+    const systemTrimmed = system.replace(ctx, ctxTrimmed);
+
+    // userText를 카드 컨텍스트와 합쳐서 첫 user 메시지로 전달
+    const firstUserContent = systemTrimmed + "\n\n질문: " + userText;
+    if (cleaned.length === 0) {
+      cleaned.push({role:"user", parts:[{text: firstUserContent}]});
+    } else {
+      cleaned.push({role:"user", parts:[{text: userText}]});
+    }
 
     const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(S.apiKey);
+
+    // system_instruction 없이 첫 메시지에 시스템 내용 포함 (호환성 최대화)
+    const body = cleaned.length === 1
+      ? { contents: cleaned, generationConfig:{maxOutputTokens:1000} }
+      : { system_instruction:{parts:[{text:systemTrimmed}]}, contents: cleaned, generationConfig:{maxOutputTokens:1000} };
+
+    const reqBody = JSON.stringify(body);
+    console.log("[Gemini] 요청 크기:", reqBody.length, "bytes, contents 수:", cleaned.length);
+
     const res = await fetch(url, {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        system_instruction:{parts:[{text:system}]},
-        contents:cleaned,
-        generationConfig:{maxOutputTokens:1000},
-      }),
+      body: reqBody,
     });
     if(!res.ok){
-      const errTxt=await res.text().catch(()=>"");
-      let detail="";
-      try{detail=JSON.parse(errTxt)?.error?.message||"";}catch(e){detail=errTxt.slice(0,200);}
-      if(res.status===400) throw new Error("Gemini 400: "+detail);
-      if(res.status===403) throw new Error("Gemini 403: API Key 권한 없음 → aistudio.google.com 재발급");
-      if(res.status===404) throw new Error("Gemini 404: aistudio.google.com에서 발급한 Key를 사용하세요");
-      throw new Error("Gemini "+res.status+": "+detail);
+      const errTxt = await res.text().catch(()=>"");
+      console.error("[Gemini] 오류 응답:", errTxt);
+      let detail = errTxt;
+      try { detail = JSON.parse(errTxt)?.error?.message || errTxt; } catch(e) {}
+      if(!detail || detail.trim()==="") detail = "응답 없음 (status="+res.status+")";
+      throw new Error("Gemini "+res.status+": "+detail.slice(0,300));
     }
-    const d=await res.json();
-    return d.candidates?.[0]?.content?.parts?.[0]?.text||"응답 없음";
+    const d = await res.json();
+    return d.candidates?.[0]?.content?.parts?.[0]?.text || "응답 없음";
   }
 }
 
