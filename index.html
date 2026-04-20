@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0b10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Arkham AI">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Arkham Card Assistant</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0b10; --surface: #111318; --panel: #16181f;
+    --border: #21242e; --accent: #c9a84c; --accent-l: #e8c96a;
+    --text: #ddd8cc; --muted: #6b6b7a; --dim: #2e3040;
+    --user-bg: #1a3358; --user-border: #254878; --user-text: #b8d4f0;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Georgia', 'Noto Serif KR', serif; overflow: hidden; }
+  body { display: flex; flex-direction: column; height: 100dvh; }
+
+  /* ── 공통 */
+  ::-webkit-scrollbar { display: none; }
+  input, textarea { -webkit-appearance: none; appearance: none; }
+  button { font-family: inherit; }
+
+  /* ── 화면 전환 */
+  .screen { display: none; flex-direction: column; height: 100dvh; }
+  .screen.active { display: flex; }
+
+  /* ══════════ 설정 화면 ══════════ */
+  #setup {
+    justify-content: center; align-items: center;
+    padding: 24px; padding-top: max(24px, var(--safe-top));
+    background: var(--bg);
+  }
+  .setup-card {
+    width: 100%; max-width: 400px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 20px; padding: 32px 24px;
+  }
+  .setup-eyebrow { font-size: 9px; letter-spacing: .3em; color: var(--accent); text-transform: uppercase; text-align: center; margin-bottom: 6px; }
+  .setup-title   { font-size: 22px; font-weight: 700; text-align: center; color: var(--text); margin-bottom: 4px; }
+  .setup-sub     { font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 28px; }
+
+  .field-label { font-size: 11px; letter-spacing: .08em; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; display: block; }
+
+  /* AI 선택 탭 */
+  .ai-tabs { display: flex; gap: 6px; margin-bottom: 20px; }
+  .ai-tab {
+    flex: 1; padding: 9px 4px; border-radius: 10px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--muted); font-size: 12px; cursor: pointer;
+    transition: all .15s; text-align: center;
+  }
+  .ai-tab.active { background: rgba(201,168,76,.12); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+  /* Key 입력 */
+  .key-wrap { position: relative; margin-bottom: 10px; }
+  .key-input {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; color: var(--text); font-size: 13px;
+    font-family: monospace; padding: 12px 44px 12px 14px;
+    outline: none; transition: border-color .2s;
+  }
+  .key-input:focus { border-color: rgba(201,168,76,.5); }
+  .key-input::placeholder { color: var(--dim); font-family: 'Georgia', serif; }
+  .eye-btn {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 4px;
+  }
+  .key-hint { font-size: 11px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; }
+  .key-hint a { color: var(--accent); text-decoration: none; }
+
+  /* 시작 버튼 */
+  .start-btn {
+    width: 100%; padding: 14px; border-radius: 12px;
+    background: var(--accent); border: none; color: #0a0b10;
+    font-size: 15px; font-weight: 700; letter-spacing: .04em;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .start-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .start-btn:active:not(:disabled) { opacity: .8; }
+
+  /* ══════════ 채팅 화면 ══════════ */
+  #chat { background: var(--bg); }
+
+  /* 헤더 */
+  .chat-header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 16px 10px;
+    padding-top: max(12px, var(--safe-top));
+    flex-shrink: 0;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .header-left { display: flex; flex-direction: column; gap: 2px; }
+  .header-eyebrow { font-size: 8px; letter-spacing: .28em; color: var(--accent); text-transform: uppercase; }
+  .header-title   { font-size: 15px; font-weight: 700; letter-spacing: .04em; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .status-badge {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 20px; padding: 3px 10px;
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #2ecc71; }
+  .settings-btn {
+    background: none; border: none; color: var(--muted);
+    font-size: 18px; cursor: pointer; padding: 4px;
+    line-height: 1;
+  }
+
+  /* 메시지 목록 */
+  .msg-list {
+    flex: 1; overflow-y: auto; padding: 14px 12px 8px;
+    display: flex; flex-direction: column; gap: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .msg-row { display: flex; gap: 8px; align-items: flex-start; }
+  .msg-row.user { justify-content: flex-end; }
+  .msg-row.bot  { justify-content: flex-start; }
+
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+    background: rgba(201,168,76,.13); border: 1px solid rgba(201,168,76,.33);
+    color: var(--accent); font-size: 9px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ai-label { font-size: 9px; letter-spacing: .05em; }
+
+  .bubble {
+    max-width: 86%; padding: 11px 14px; border-radius: 16px;
+    font-size: 14px; line-height: 1.72; word-break: break-word;
+  }
+  .bubble.user { background: var(--user-bg); border: 1px solid var(--user-border); border-bottom-right-radius: 4px; color: var(--user-text); }
+  .bubble.bot  { background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .bubble.error{ background: #3d1515; border: 1px solid #5a2020; }
+
+  /* 타이핑 인디케이터 */
+  .typing { display: flex; gap: 5px; padding: 4px 0; }
+  .typing span {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: .18s; }
+  .typing span:nth-child(3) { animation-delay: .36s; }
+
+  /* 퀵 칩 */
+  .chips {
+    display: flex; gap: 8px; overflow-x: auto;
+    padding: 0 12px 10px; flex-shrink: 0; scrollbar-width: none;
+  }
+  .chip {
+    background: transparent; border: 1px solid #2a2d38;
+    border-radius: 20px; color: var(--muted); font-size: 12px;
+    padding: 7px 14px; white-space: nowrap; cursor: pointer; flex-shrink: 0;
+    font-family: 'Georgia', serif;
+  }
+  .chip:active { background: rgba(201,168,76,.08); }
+
+  /* 입력창 */
+  .input-wrap {
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 10px 12px;
+    padding-bottom: max(12px, var(--safe-bottom));
+    flex-shrink: 0;
+  }
+  .input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .input-ta {
+    flex: 1; background: var(--panel); border: 1px solid #2a2d38;
+    border-radius: 22px; color: var(--text); font-size: 15px;
+    font-family: 'Georgia', serif; padding: 10px 16px;
+    resize: none; outline: none; line-height: 1.5;
+    max-height: 96px; overflow-y: auto; transition: border-color .2s;
+  }
+  .input-ta:focus { border-color: rgba(201,168,76,.4); }
+  .input-ta::placeholder { color: var(--dim); }
+  .send-btn {
+    width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+    background: var(--accent); border: none; color: #0a0b10;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: background .15s;
+  }
+  .send-btn:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; }
+  .send-btn:active:not(:disabled) { opacity: .8; }
+  .input-hint { font-size: 10px; color: var(--dim); text-align: right; margin-top: 5px; }
+
+  /* 마크다운 */
+  .md-h    { font-weight: 700; color: var(--accent-l); margin: 6px 0 3px; font-size: 14px; }
+  .md-li   { padding-left: 10px; margin-bottom: 3px; color: #bbb8b0; }
+  .md-line { margin-bottom: 2px; }
+  .md-bold { color: var(--accent); font-weight: 700; }
+  .md-gap  { height: 6px; }
+
+  /* 로딩 스피너 */
+  .spinner-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; }
+  .spinner {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  .spinner-txt { color: var(--muted); font-size: 13px; margin-top: 18px; }
+  .spinner-sub { color: var(--dim); font-size: 11px; margin-top: 6px; }
+
+  @keyframes spin  { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100%{opacity:.25;transform:scale(.7)} 50%{opacity:1;transform:scale(1)} }
+</style>
+</head>
+<body>
+
+<!-- ══════════ 설정 화면 ══════════ -->
+<div id="setup" class="screen active">
+  <div class="setup-card">
+    <div class="setup-eyebrow">Arkham Horror LCG</div>
+    <div class="setup-title">Card Assistant</div>
+    <div class="setup-sub">AI 서비스와 API Key를 설정하세요</div>
+
+    <label class="field-label">AI 서비스 선택</label>
+    <div class="ai-tabs">
+      <button class="ai-tab active" data-ai="claude">Claude</button>
+      <button class="ai-tab" data-ai="openai">GPT-4o</button>
+      <button class="ai-tab" data-ai="gemini">Gemini</button>
+    </div>
+
+    <label class="field-label">API Key</label>
+    <div class="key-wrap">
+      <input class="key-input" id="keyInput" type="password" placeholder="API Key를 입력하세요" autocomplete="off" spellcheck="false">
+      <button class="eye-btn" id="eyeBtn" type="button">👁</button>
+    </div>
+    <div class="key-hint" id="keyHint">
+      발급: <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>
+      → API Keys → Create Key
+    </div>
+
+    <button class="start-btn" id="startBtn" disabled>시작하기</button>
+  </div>
+</div>
+
+<!-- ══════════ 채팅 화면 ══════════ -->
+<div id="chat" class="screen">
+  <div class="chat-header">
+    <div class="header-left">
+      <span class="header-eyebrow">Arkham Horror LCG</span>
+      <span class="header-title">Card Assistant</span>
+    </div>
+    <div class="header-right">
+      <span class="status-badge">
+        <span class="status-dot"></span>
+        <span id="cardCount">로딩중</span>
+      </span>
+      <button class="settings-btn" id="settingsBtn" title="설정">⚙</button>
+    </div>
+  </div>
+
+  <div class="msg-list" id="msgList">
+    <div class="spinner-wrap" id="loadingWrap">
+      <div class="spinner"></div>
+      <div class="spinner-txt">카드 데이터 로딩 중…</div>
+      <div class="spinner-sub">잠시만 기다려 주세요</div>
+    </div>
+  </div>
+
+  <div class="chips" id="chips" style="display:none">
+    <button class="chip">수호자 레벨0 무기 추천</button>
+    <button class="chip">롤랜드 뱅크스 덱 추천</button>
+    <button class="chip">신비주의자 주문 비교</button>
+    <button class="chip">생존자 강력한 이벤트</button>
+  </div>
+
+  <div class="input-wrap">
+    <div class="input-row">
+      <textarea class="input-ta" id="inputTa" placeholder="질문을 입력하세요…" rows="1" disabled></textarea>
+      <button class="send-btn" id="sendBtn" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="input-hint">Enter 전송 · Shift+Enter 줄바꿈</div>
+  </div>
+</div>
+
+<script>
+// ══════════ 상태 ══════════
+const S = {
+  ai: "claude",
+  apiKey: "",
+  cards: null,
+  messages: [],
+  thinking: false,
+};
+
+const AI_CFG = {
+  claude: {
+    url: "https://api.anthropic.com/v1/messages",
+    hint: '발급: <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> → API Keys → Create Key',
+    placeholder: "sk-ant-api03-...",
+  },
+  openai: {
+    url: "https://api.openai.com/v1/chat/completions",
+    hint: '발급: <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a> → Create new secret key',
+    placeholder: "sk-proj-...",
+  },
+  gemini: {
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+    hint: '발급: <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a> → Get API key',
+    placeholder: "AIza...",
+  },
+};
+
+const FACTION_KO = {guardian:"수호자",seeker:"탐구자",rogue:"무법자",mystic:"신비주의자",survivor:"생존자",neutral:"중립",mythos:"신화"};
+const TYPE_KO    = {investigator:"조사자",asset:"자산",event:"이벤트",skill:"능력",enemy:"적",treachery:"음모",location:"장소"};
+const QUICK      = ["수호자 레벨0 무기 추천","롤랜드 뱅크스 덱 추천","신비주의자 주문 비교","생존자 강력한 이벤트"];
+
+// ══════════ 설정 화면 로직 ══════════
+const $ = id => document.getElementById(id);
+const setupEl = $("setup"), chatEl = $("chat");
+const keyInput = $("keyInput"), startBtn = $("startBtn");
+const keyHint  = $("keyHint"), eyeBtn = $("eyeBtn");
+
+// 저장된 설정 불러오기
+function loadSaved() {
+  try {
+    const saved = localStorage.getItem("arkham_cfg");
+    if (saved) {
+      const cfg = JSON.parse(saved);
+      S.ai     = cfg.ai || "claude";
+      S.apiKey = cfg.key || "";
+      keyInput.value = S.apiKey;
+      document.querySelectorAll(".ai-tab").forEach(t => {
+        t.classList.toggle("active", t.dataset.ai === S.ai);
+      });
+      updateHint();
+      checkStart();
+    }
+  } catch(e) {}
+}
+
+function saveCfg() {
+  localStorage.setItem("arkham_cfg", JSON.stringify({ ai: S.ai, key: S.apiKey }));
+}
+
+function updateHint() {
+  const cfg = AI_CFG[S.ai];
+  keyHint.innerHTML = cfg.hint;
+  keyInput.placeholder = cfg.placeholder;
+}
+
+// AI 탭 전환
+document.querySelectorAll(".ai-tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    S.ai = btn.dataset.ai;
+    document.querySelectorAll(".ai-tab").forEach(t => t.classList.toggle("active", t.dataset.ai === S.ai));
+    updateHint();
+    checkStart();
+  });
+});
+
+// Key 입력 감지
+keyInput.addEventListener("input", () => {
+  S.apiKey = keyInput.value.trim();
+  checkStart();
+});
+
+function checkStart() {
+  startBtn.disabled = S.apiKey.length < 10;
+}
+
+// 눈 아이콘 토글
+let keyVisible = false;
+eyeBtn.addEventListener("click", () => {
+  keyVisible = !keyVisible;
+  keyInput.type = keyVisible ? "text" : "password";
+  eyeBtn.textContent = keyVisible ? "🙈" : "👁";
+});
+
+// 시작 버튼
+startBtn.addEventListener("click", () => {
+  saveCfg();
+  setupEl.classList.remove("active");
+  chatEl.classList.add("active");
+  initChat();
+});
+
+// ══════════ 채팅 로직 ══════════
+const msgList  = $("msgList");
+const inputTa  = $("inputTa");
+const sendBtn  = $("sendBtn");
+const chipsEl  = $("chips");
+const cardCountEl = $("cardCount");
+
+$("settingsBtn").addEventListener("click", () => {
+  chatEl.classList.remove("active");
+  setupEl.classList.add("active");
+});
+
+// 카드 데이터
+function sanitize(v) {
+  if (!v) return "";
+  return String(v).replace(/\[[^\]]*\]/g,"").replace(/<[^>]*>/g,"").trim();
+}
+
+function cardSummary(c) {
+  return [
+    `[${c.code}] ${c.name||c.real_name}`,
+    c.real_name&&c.name!==c.real_name?`(${c.real_name})`:"",
+    `유형:${TYPE_KO[c.type_code]||c.type_code}`,
+    `클래스:${FACTION_KO[c.faction_code]||c.faction_code}`,
+    c.cost!=null?`비용:${c.cost}`:"",
+    c.xp!=null?`XP:${c.xp}`:"",
+    c.skill_willpower?`의지:${c.skill_willpower}`:"",
+    c.skill_intellect?`지성:${c.skill_intellect}`:"",
+    c.skill_combat?`전투:${c.skill_combat}`:"",
+    c.skill_agility?`민첩:${c.skill_agility}`:"",
+    c.health?`체력:${c.health}`:"",
+    c.sanity?`정신:${c.sanity}`:"",
+    c.traits?`특성:[${sanitize(c.traits)}]`:"",
+    c.slot?`슬롯:${sanitize(c.slot)}`:"",
+    c.text?`효과:${sanitize(c.text).slice(0,200)}`:"",
+    `확장:${c.pack_name||c.pack_code}`,
+  ].filter(Boolean).join(" / ");
+}
+
+function retrieveCards(query) {
+  const q = query.toLowerCase();
+  const fMap={수호자:"guardian",탐구자:"seeker",무법자:"rogue",신비주의자:"mystic",생존자:"survivor",중립:"neutral",guardian:"guardian",seeker:"seeker",rogue:"rogue",mystic:"mystic",survivor:"survivor"};
+  const tMap={자산:"asset",이벤트:"event",능력:"skill",조사자:"investigator",asset:"asset",event:"event",skill:"skill",investigator:"investigator"};
+  let f = S.cards.filter(c=>["investigator","asset","event","skill"].includes(c.type_code));
+  for (const [k,v] of Object.entries(fMap)) { if(q.includes(k)){f=f.filter(c=>c.faction_code===v||c.faction_code==="neutral");break;} }
+  for (const [k,v] of Object.entries(tMap)) { if(q.includes(k)){f=f.filter(c=>c.type_code===v);break;} }
+  const xpM=q.match(/레벨\s*(\d)|xp\s*(\d)/);
+  if(xpM){const xp=parseInt(xpM[1]||xpM[2]);f=f.filter(c=>(c.xp??0)===xp);}
+  for(const kw of["무기","갑옷","동지","마법","전술","통찰","weapon","spell","ally"]){
+    if(q.includes(kw)) f=f.filter(c=>(c.traits||"").toLowerCase().includes(kw)||(c.real_traits||"").toLowerCase().includes(kw));
+  }
+  return f.slice(0,40);
+}
+
+// AI 호출
+async function callAI(ctx) {
+  const apiMsgs = S.messages
+    .filter(m=>!m.isWelcome)
+    .map(m=>({role:m.role==="bot"?"assistant":"user",content:m.text}));
+
+  const system = `당신은 Arkham Horror: The Card Game 전문 AI 어시스턴트입니다.
+한국어로 답변하며 세 역할을 수행합니다: 카드 검색, 덱 빌딩 추천, 카드 효과 설명/비교.
+모바일에서 읽기 좋도록 답변은 간결하게 작성하세요.
+
+관련 카드 데이터:
+<cards>
+${ctx}
+</cards>
+
+규칙: 카드명은 한국어명(영문명) 형식. 수치 근거로 설명. 없는 카드 추측 금지.`;
+
+  if (S.ai === "claude") {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":S.apiKey,"anthropic-version":"2023-06-01"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system,messages:apiMsgs}),
+    });
+    if(!res.ok) throw new Error(`Claude API 오류 ${res.status}`);
+    const d = await res.json();
+    return d.content?.[0]?.text || "응답 없음";
+
+  } else if (S.ai === "openai") {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${S.apiKey}`},
+      body:JSON.stringify({model:"gpt-4o-mini",max_tokens:1000,messages:[{role:"system",content:system},...apiMsgs]}),
+    });
+    if(!res.ok) throw new Error(`OpenAI API 오류 ${res.status}`);
+    const d = await res.json();
+    return d.choices?.[0]?.message?.content || "응답 없음";
+
+  } else {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${S.apiKey}`;
+    const contents = apiMsgs.map(m=>({role:m.role==="assistant"?"model":"user",parts:[{text:m.content}]}));
+    const res = await fetch(url, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({system_instruction:{parts:[{text:system}]},contents}),
+    });
+    if(!res.ok) throw new Error(`Gemini API 오류 ${res.status}`);
+    const d = await res.json();
+    return d.candidates?.[0]?.content?.parts?.[0]?.text || "응답 없음";
+  }
+}
+
+// 마크다운 → HTML
+function mdToHtml(text) {
+  return text.split("\n").map(line => {
+    if (line.startsWith("**") && line.endsWith("**") && line.length>4)
+      return `<div class="md-h">${esc(line.slice(2,-2))}</div>`;
+    const html = esc(line)
+      .replace(/\*\*([^*]+)\*\*/g, '<span class="md-bold">$1</span>');
+    if (line.startsWith("- ")||line.startsWith("• "))
+      return `<div class="md-li">· ${html.replace(/^[·\-•]\s*/,"")}</div>`;
+    if (line==="") return `<div class="md-gap"></div>`;
+    return `<div class="md-line">${html}</div>`;
+  }).join("");
+}
+
+function esc(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// 메시지 렌더
+function appendMsg(role, text, isError=false) {
+  const row = document.createElement("div");
+  row.className = `msg-row ${role==="user"?"user":"bot"}`;
+
+  if (role==="bot") {
+    row.innerHTML = `<div class="avatar"><span class="ai-label">AI</span></div><div class="bubble bot${isError?" error":""}"></div>`;
+    row.querySelector(".bubble").innerHTML = mdToHtml(text);
+  } else {
+    row.innerHTML = `<div class="bubble user">${mdToHtml(text)}</div>`;
+  }
+  msgList.appendChild(row);
+  row.scrollIntoView({behavior:"smooth", block:"end"});
+  return row;
+}
+
+function appendTyping() {
+  const row = document.createElement("div");
+  row.className = "msg-row bot";
+  row.id = "typingRow";
+  row.innerHTML = `<div class="avatar"><span class="ai-label">AI</span></div><div class="bubble bot"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  msgList.appendChild(row);
+  row.scrollIntoView({behavior:"smooth", block:"end"});
+}
+
+function removeTyping() {
+  const t = $("typingRow");
+  if (t) t.remove();
+}
+
+// 퀵 칩
+chipsEl.querySelectorAll(".chip").forEach(c => {
+  c.addEventListener("click", () => sendMsg(c.textContent));
+});
+
+// 입력 자동 높이
+inputTa.addEventListener("input", () => {
+  inputTa.style.height = "auto";
+  inputTa.style.height = Math.min(inputTa.scrollHeight, 96) + "px";
+  sendBtn.disabled = !inputTa.value.trim() || S.thinking;
+});
+
+inputTa.addEventListener("keydown", e => {
+  if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+});
+
+sendBtn.addEventListener("click", () => sendMsg());
+
+inputTa.addEventListener("focus", () => {
+  setTimeout(() => msgList.scrollTop = msgList.scrollHeight, 350);
+});
+
+async function sendMsg(preset) {
+  const txt = (preset || inputTa.value).trim();
+  if (!txt || S.thinking || !S.cards) return;
+
+  inputTa.value = "";
+  inputTa.style.height = "auto";
+  sendBtn.disabled = true;
+  chipsEl.style.display = "none";
+
+  S.messages.push({role:"user", text:txt});
+  appendMsg("user", txt);
+  S.thinking = true;
+  appendTyping();
+
+  try {
+    const rel = retrieveCards(txt);
+    const ctx = rel.length>0 ? rel.map(cardSummary).join("\n") : "관련 카드 없음.";
+    const reply = await callAI(ctx);
+    removeTyping();
+    S.messages.push({role:"bot", text:reply});
+    appendMsg("bot", reply);
+  } catch(e) {
+    removeTyping();
+    const msg = `오류: ${e.message}\n\n설정(⚙)에서 API Key를 확인해 주세요.`;
+    S.messages.push({role:"bot", text:msg, isError:true});
+    appendMsg("bot", msg, true);
+  } finally {
+    S.thinking = false;
+    inputTa.disabled = false;
+    sendBtn.disabled = false;
+    inputTa.focus();
+  }
+}
+
+// 초기화
+async function initChat() {
+  msgList.innerHTML = `
+    <div class="spinner-wrap" id="loadingWrap">
+      <div class="spinner"></div>
+      <div class="spinner-txt">카드 데이터 로딩 중…</div>
+      <div class="spinner-sub">잠시만 기다려 주세요</div>
+    </div>`;
+  inputTa.disabled = true;
+  sendBtn.disabled = true;
+  chipsEl.style.display = "none";
+
+  try {
+    const res = await fetch("https://ko.arkhamdb.com/api/public/cards/");
+    if (!res.ok) throw new Error("카드 데이터 로드 실패");
+    S.cards = await res.json();
+    cardCountEl.textContent = S.cards.length.toLocaleString() + "장";
+
+    msgList.innerHTML = "";
+    S.messages = [];
+    const welcome = `**아컴 호러 카드 어시스턴트**\n\n**${S.cards.length.toLocaleString()}장** 로드 완료.\n\n무엇이든 물어보세요:\n- "수호자 레벨0 무기 추천"\n- "롤랜드 뱅크스 덱 구성"\n- "신비주의자 주문 비교"\n- "긴급 지원 효과 설명"`;
+    S.messages.push({role:"bot", text:welcome, isWelcome:true});
+    appendMsg("bot", welcome);
+
+    chipsEl.style.display = "flex";
+    inputTa.disabled = false;
+    sendBtn.disabled = false;
+
+  } catch(e) {
+    msgList.innerHTML = `
+      <div class="spinner-wrap">
+        <div style="font-size:28px;margin-bottom:12px">⚠</div>
+        <div style="color:#ddd8cc;font-size:14px;font-weight:700;margin-bottom:6px">카드 로드 실패</div>
+        <div style="color:#6b6b7a;font-size:12px">${e.message}</div>
+      </div>`;
+  }
+}
+
+// 페이지 로드 시
+loadSaved();
+if (S.apiKey.length >= 10) {
+  // 저장된 key가 있으면 바로 채팅 화면으로
+  setupEl.classList.remove("active");
+  chatEl.classList.add("active");
+  initChat();
+}
+
+// Service Worker 등록
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
