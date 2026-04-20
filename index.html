@@ -428,33 +428,331 @@ function cardSummary(c) {
 
 function retrieveCards(query) {
   const q = query.toLowerCase();
-  const fMap={수호자:"guardian",탐구자:"seeker",무법자:"rogue",신비주의자:"mystic",생존자:"survivor",중립:"neutral",guardian:"guardian",seeker:"seeker",rogue:"rogue",mystic:"mystic",survivor:"survivor"};
-  const tMap={자산:"asset",이벤트:"event",능력:"skill",조사자:"investigator",asset:"asset",event:"event",skill:"skill",investigator:"investigator"};
-  let f = S.cards.filter(c=>["investigator","asset","event","skill"].includes(c.type_code));
-  for (const [k,v] of Object.entries(fMap)) { if(q.includes(k)){f=f.filter(c=>c.faction_code===v||c.faction_code==="neutral");break;} }
-  for (const [k,v] of Object.entries(tMap)) { if(q.includes(k)){f=f.filter(c=>c.type_code===v);break;} }
-  const xpM=q.match(/레벨\s*(\d)|xp\s*(\d)/);
-  if(xpM){const xp=parseInt(xpM[1]||xpM[2]);f=f.filter(c=>(c.xp??0)===xp);}
-  for(const kw of["무기","갑옷","동지","마법","전술","통찰","weapon","spell","ally"]){
-    if(q.includes(kw)) f=f.filter(c=>(c.traits||"").toLowerCase().includes(kw)||(c.real_traits||"").toLowerCase().includes(kw));
+
+  // ── 클래스 맵
+  const fMap = {
+    수호자:"guardian", 탐구자:"seeker", 무법자:"rogue",
+    신비주의자:"mystic", 생존자:"survivor", 중립:"neutral",
+    guardian:"guardian", seeker:"seeker", rogue:"rogue",
+    mystic:"mystic", survivor:"survivor", neutral:"neutral",
+  };
+  // ── 유형 맵
+  const tMap = {
+    자산:"asset", 이벤트:"event", 능력:"skill", 스킬:"skill",
+    조사자카드:"investigator",
+    asset:"asset", event:"event", skill:"skill",
+  };
+  // ── 특성 맵
+  const traitMap = {
+    무기:"weapon", weapon:"weapon",
+    총:"firearm", firearm:"firearm", 권총:"firearm", 소총:"firearm",
+    근접:"melee", melee:"melee", 칼:"melee", 검:"melee",
+    갑옷:"armor", armor:"armor",
+    동지:"ally", ally:"ally",
+    마법:"spell", 주문:"spell", spell:"spell",
+    전술:"tactic", tactic:"tactic",
+    통찰:"insight", insight:"insight",
+    아이템:"item", item:"item",
+    축복:"blessed", blessed:"blessed",
+    저주:"cursed", cursed:"cursed",
+    책:"tome", tome:"tome",
+    도구:"tool", tool:"tool",
+    사건:"gambit", gambit:"gambit",
+    트릭:"trick", trick:"trick",
+    차량:"vehicle", vehicle:"vehicle",
+    의식:"ritual", ritual:"ritual",
+    재능:"talent", talent:"talent",
+  };
+  // ── 슬롯 맵
+  const slotMap = {
+    손:"hand", "양손":"hand x2", "두손":"hand x2",
+    몸:"body", 신체:"body",
+    머리:"head", 모자:"head",
+    장신구:"accessory",
+    마법슬롯:"arcane", 아케인:"arcane",
+    조력자슬롯:"ally",
+  };
+
+  // ── 역할 키워드 → 텍스트 검색어 매핑
+  const roleMap = {
+    힐러:    ["heal","체력 회복","피해를 회복","공포를 회복","회복"],
+    치료사:  ["heal","체력 회복","피해를 회복","회복"],
+    힐링:    ["heal","체력 회복","피해를 회복","회복"],
+    탱커:    ["방어","피해 감소","horror","공포 감소","보호"],
+    서포터:  ["자원","draw","카드를 뽑","추가 행동"],
+    지원:    ["자원","draw","카드를 뽑","추가 행동"],
+    드로우:  ["draw","카드를 뽑","카드를 가져"],
+    자원:    ["자원을 얻","resource"],
+    클루버:  ["단서","clue","조사"],
+    단서수집:["단서","clue","조사"],
+    파이터:  ["전투","combat","적을","enemy","피해"],
+    전투형:  ["전투","combat","적을","피해"],
+    이동:    ["이동","move","장소로"],
+    회피:    ["회피","evade","민첩"],
+    저주덱:  ["저주","cursed","저주 토큰"],
+    축복덱:  ["축복","blessed","축복 토큰"],
+  };
+
+  // ── XP 패턴
+  const xpFreeM  = q.match(/0\s*렙|레벨\s*0|lv\s*0|xp\s*0|무경험|무\s*xp/);
+  const xpRangeM = q.match(/(\d+)\s*렙\s*이상|레벨\s*(\d+)\s*이상|xp\s*(\d+)\s*이상/);
+  const xpExactM = q.match(/(?<!\d)(\d+)\s*렙(?!\s*이상)|레벨\s*(\d+)(?!\s*이상)|lv\s*(\d+)|xp\s*(\d+)(?!\s*이상)/);
+  const costM    = q.match(/비용\s*(\d+)|cost\s*(\d+)|(\d+)\s*코스트/);
+
+  // ── 역할 감지
+  const detectedRoles = [];
+  for (const [roleKw, searchTerms] of Object.entries(roleMap)) {
+    if (q.includes(roleKw)) detectedRoles.push(...searchTerms);
   }
-  return f.slice(0,40);
+
+  // ── 덱 빌딩 요청 감지
+  const isDeckReq = q.includes("덱") || q.includes("deck") || q.includes("빌딩") ||
+                    q.includes("구성") || q.includes("추천") || q.includes("어울리") ||
+                    q.includes("빌드") || q.includes("만들어");
+
+  // ── 조사자 퍼지 매칭
+  let targetInvestigator = null;
+  if (isDeckReq || q.includes("조사자")) {
+    const investigators = S.cards.filter(c => c.type_code === "investigator");
+    let bestScore = 0;
+    for (const inv of investigators) {
+      const nameKo  = (inv.name    || "").toLowerCase();
+      const nameEn  = (inv.real_name || "").toLowerCase();
+      const subname = (inv.subname || "").toLowerCase();
+      // 토큰 단위 매칭 점수 계산
+      let score = 0;
+      const tokens = [...nameKo.split(/\s+/), ...nameEn.split(/\s+/), ...subname.split(/\s+/)]
+                     .filter(t => t.length >= 2);
+      for (const t of tokens) {
+        if (q.includes(t)) score += t.length; // 긴 토큰일수록 높은 점수
+      }
+      // 부분 문자열 매칭 (2글자 이상 슬라이딩)
+      for (let len = 2; len <= Math.min(nameKo.length, 6); len++) {
+        for (let i = 0; i <= nameKo.length - len; i++) {
+          const sub = nameKo.slice(i, i + len);
+          if (q.includes(sub)) score += len * 0.5;
+        }
+      }
+      if (score > bestScore) { bestScore = score; targetInvestigator = inv; }
+    }
+    if (bestScore < 2) targetInvestigator = null; // 점수 미달이면 무시
+  }
+
+  // ── 풀 초기화 (플레이어 카드)
+  let pool = S.cards.filter(c =>
+    ["investigator","asset","event","skill"].includes(c.type_code)
+  );
+
+  // ── 덱 빌딩 모드: deck_options 기반 필터
+  if (targetInvestigator && targetInvestigator.deck_options) {
+    const opts = targetInvestigator.deck_options;
+    pool = pool.filter(c => {
+      if (c.type_code === "investigator") return false;
+      if (c.faction_code === "neutral") return true;
+      for (const opt of opts) {
+        if (opt.faction && opt.faction.includes(c.faction_code)) {
+          const lvMin = opt.level?.min ?? 0;
+          const lvMax = opt.level?.max ?? 5;
+          if ((c.xp ?? 0) >= lvMin && (c.xp ?? 0) <= lvMax) return true;
+        }
+        if (opt.trait) {
+          const cardTraits = ((c.real_traits||"")+" "+(c.traits||"")).toLowerCase();
+          if (opt.trait.some(t => cardTraits.includes(t.toLowerCase()))) {
+            if ((c.xp??0) >= (opt.level?.min??0) && (c.xp??0) <= (opt.level?.max??5)) return true;
+          }
+        }
+      }
+      return false;
+    });
+    // 0렙 필터 추가 적용 (초보 덱 요청 시)
+    if (xpFreeM || q.includes("초보") || q.includes("스타터")) {
+      pool = pool.filter(c => (c.xp ?? 0) === 0);
+    }
+  } else {
+    // ── 일반 모드 필터
+    for (const [k,v] of Object.entries(fMap)) {
+      if (q.includes(k)) {
+        pool = pool.filter(c => c.faction_code === v || c.faction_code === "neutral");
+        break;
+      }
+    }
+    for (const [k,v] of Object.entries(tMap)) {
+      if (q.includes(k)) { pool = pool.filter(c => c.type_code === v); break; }
+    }
+    if (xpFreeM) {
+      pool = pool.filter(c => (c.xp ?? 0) === 0);
+    } else if (xpRangeM) {
+      const min = parseInt(xpRangeM[1]||xpRangeM[2]||xpRangeM[3]);
+      pool = pool.filter(c => (c.xp ?? 0) >= min);
+    } else if (xpExactM) {
+      const xp = parseInt(xpExactM[1]||xpExactM[2]||xpExactM[3]||xpExactM[4]);
+      if (!isNaN(xp)) pool = pool.filter(c => (c.xp ?? 0) === xp);
+    }
+  }
+
+  // ── 비용 필터 (공통)
+  if (costM) {
+    const cost = parseInt(costM[1]||costM[2]||costM[3]);
+    pool = pool.filter(c => c.cost === cost);
+  }
+
+  // ── 특성 필터 (공통)
+  for (const [k, engTrait] of Object.entries(traitMap)) {
+    if (q.includes(k)) {
+      pool = pool.filter(c => {
+        const t = ((c.traits||"")+" "+(c.real_traits||"")).toLowerCase();
+        return t.includes(engTrait) || t.includes(k);
+      });
+    }
+  }
+
+  // ── 슬롯 필터 (공통)
+  for (const [k, engSlot] of Object.entries(slotMap)) {
+    if (q.includes(k)) {
+      pool = pool.filter(c => (c.slot||"").toLowerCase().includes(engSlot));
+      break;
+    }
+  }
+
+  // ── 유니크/영구
+  if (q.includes("유니크")||q.includes("unique")) pool = pool.filter(c => c.is_unique);
+  if (q.includes("영구")||q.includes("permanent")) pool = pool.filter(c => c.permanent);
+
+  // ── 역할 기반 텍스트 검색 (힐러, 탱커 등)
+  if (detectedRoles.length > 0) {
+    const roleMatches = pool.filter(c => {
+      const txt = sanitize((c.text||"")+" "+(c.traits||"")+" "+(c.real_traits||"")).toLowerCase();
+      return detectedRoles.some(term => txt.includes(term.toLowerCase()));
+    });
+    if (roleMatches.length >= 3) pool = roleMatches;
+  }
+
+  // ── 일반 키워드 검색
+  const stopWords = new Set([
+    ...Object.keys(fMap), ...Object.keys(tMap), ...Object.keys(traitMap),
+    ...Object.keys(slotMap), ...Object.keys(roleMap),
+    "추천","좋은","강한","강력한","최고","인기","덱","비교","설명","알려줘","찾아줘",
+    "뭐가","어떤","있어","없어","해줘","이상","이하","렙","레벨","xp","lv",
+    "비용","코스트","슬롯","유니크","영구","이벤트","자산","능력","스킬",
+    "조사자","수호자","탐구자","무법자","신비주의자","생존자","중립",
+    "덱빌딩","구성","어울리","빌딩","빌드","카드","아컴","호러","만들어",
+    "초보","스타터","시작","처음","입문",
+  ]);
+  const words = q.split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w));
+
+  if (words.length > 0 && !targetInvestigator) {
+    const nameHits = pool.filter(c => {
+      const name = ((c.name||"")+" "+(c.real_name||"")).toLowerCase();
+      return words.some(w => name.includes(w));
+    });
+    const textHits = pool.filter(c => {
+      const text = sanitize((c.text||"")+" "+(c.traits||"")+" "+(c.real_traits||"")).toLowerCase();
+      return words.some(w => text.includes(w));
+    });
+    const combined = [...nameHits];
+    for (const c of textHits) {
+      if (!combined.find(x => x.code === c.code)) combined.push(c);
+    }
+    if (combined.length > 0) pool = combined;
+  }
+
+  // ── 완화 검색 (결과 3장 미만)
+  if (pool.length < 3 && words.length > 0) {
+    const all = S.cards.filter(c => ["investigator","asset","event","skill"].includes(c.type_code));
+    const relaxed = all.filter(c => {
+      const name = ((c.name||"")+" "+(c.real_name||"")).toLowerCase();
+      return words.some(w => name.includes(w));
+    });
+    if (relaxed.length > 0) pool = relaxed;
+  }
+
+  // ── 조사자 카드 앞에 추가
+  if (targetInvestigator) {
+    pool = [targetInvestigator, ...pool.filter(c => c.code !== targetInvestigator.code)];
+  }
+
+  return pool.slice(0, 60);
 }
+
+// 덱 빌딩/역할 컨텍스트 생성
+function buildDeckContext(query, cards) {
+  const q = query.toLowerCase();
+  const isDeckReq = q.includes("덱")||q.includes("구성")||q.includes("추천")||
+                    q.includes("빌딩")||q.includes("빌드")||q.includes("만들어");
+  if (!isDeckReq) return null;
+
+  const inv = cards.find(c => c.type_code === "investigator");
+  if (!inv) return null;
+
+  const opts = inv.deck_options || [];
+  const optSummary = opts.map(o => {
+    if (o.faction) return `${o.faction.join("/")} 클래스 레벨${o.level?.min??0}-${o.level?.max??5}`;
+    if (o.trait)   return `특성[${o.trait.join(",")}] 레벨${o.level?.min??0}-${o.level?.max??5}`;
+    return JSON.stringify(o);
+  }).join(", ");
+
+  const req = inv.deck_requirements;
+  const reqStr = req ? `덱 크기:${req.size}장` : "";
+
+  // 역할 감지 → 추가 지시
+  const roleHints = [];
+  const roleKeywords = {
+    "힐러":"체력/정신력 회복 카드를 우선 포함하세요",
+    "치료사":"체력/정신력 회복 카드를 우선 포함하세요",
+    "힐링":"체력/정신력 회복 카드를 우선 포함하세요",
+    "탱커":"피해 방어 및 체력 관련 카드 위주로 구성하세요",
+    "서포터":"자원 공급, 카드 드로우, 팀 지원 카드를 중심으로 구성하세요",
+    "클루버":"단서 발견 및 조사 관련 카드를 위주로 구성하세요",
+    "파이터":"전투 및 적 처치 관련 카드를 위주로 구성하세요",
+    "드로우":"카드 드로우 및 핸드 관리 카드를 포함하세요",
+    "저주덱":"저주 토큰 관련 카드를 중심으로 구성하세요",
+    "축복덱":"축복 토큰 관련 카드를 중심으로 구성하세요",
+    "초보":"레벨 0 카드만 사용하는 스타터 덱으로 구성하세요",
+    "스타터":"레벨 0 카드만 사용하는 스타터 덱으로 구성하세요",
+    "입문":"레벨 0 카드만 사용하는 스타터 덱으로 구성하세요",
+  };
+  for (const [kw, hint] of Object.entries(roleKeywords)) {
+    if (q.includes(kw)) roleHints.push(hint);
+  }
+
+  return `[조사자 정보]
+이름: ${inv.name||inv.real_name} (${inv.real_name||""})
+능력치: 의지${inv.skill_willpower} / 지성${inv.skill_intellect} / 전투${inv.skill_combat} / 민첩${inv.skill_agility}
+체력:${inv.health} / 정신력:${inv.sanity}
+${reqStr}
+덱 구성 허용 범위: ${optSummary}
+조사자 특수 능력: ${sanitize(inv.text||"").slice(0,400)}
+${roleHints.length > 0 ? "\n[덱 구성 방향]\n" + roleHints.join("\n") : ""}`;
+}
+
 
 // AI 호출
 async function callAI(ctx, userText) {
   const hist = S.messages.filter(m=>!m.isWelcome).slice(0,-1);
 
   const system = `당신은 Arkham Horror: The Card Game 전문 AI 어시스턴트입니다.
-한국어로 답변하며 세 역할을 수행합니다: 카드 검색, 덱 빌딩 추천, 카드 효과 설명/비교.
-모바일에서 읽기 좋도록 답변은 간결하게 작성하세요.
+한국어로 답변하며 다음 역할을 수행합니다:
+1. 카드 검색: 조건에 맞는 카드 목록과 효과 설명
+2. 덱 빌딩: 조사자 능력과 요청 역할(힐러/파이터/클루버 등)에 맞는 덱 구성
+3. 카드 설명/비교: 카드 텍스트 해석 및 시너지 분석
 
-관련 카드 데이터:
+모바일에서 읽기 좋도록 간결하게 작성하세요.
+
+관련 데이터:
 <cards>
-${ctx}
+\${ctx}
 </cards>
 
-규칙: 카드명은 한국어명(영문명) 형식. 수치 근거로 설명. 없는 카드 추측 금지.`;
+답변 규칙:
+- 카드명은 한국어명(영문명) 형식으로 표기
+- 제공된 카드 데이터에 없는 카드는 절대 추측하지 말 것
+- 덱 추천 시:
+  · 조사자의 덱 구성 허용 범위(클래스/레벨)를 반드시 준수
+  · 요청한 역할(힐러/파이터 등) 컨셉에 맞는 카드 우선 선택
+  · 핵심 카드 12~18장을 역할별로 분류해서 제시 (전투/단서/회복/자원/유틸)
+  · 조사자 특수 능력과 시너지 있는 카드 강조
+  · 각 카드마다 채택 이유 1줄씩 설명
+- 조사자를 못 찾았거나 데이터가 부족하면 솔직하게 알려줄 것`;
 
   if (S.ai === "claude") {
     const msgs = [
@@ -620,7 +918,10 @@ async function sendMsg(preset) {
 
   try {
     const rel = retrieveCards(txt);
-    const ctx = rel.length>0 ? rel.map(cardSummary).join("\n") : "관련 카드 없음.";
+    // 덱 빌딩 컨텍스트 추가
+    const deckCtx = buildDeckContext(txt, rel);
+    const cardCtx = rel.length>0 ? rel.map(cardSummary).join("\n") : "관련 카드 없음.";
+    const ctx = deckCtx ? deckCtx + "\n\n[검색된 사용 가능 카드]\n" + cardCtx : cardCtx;
     const reply = await callAI(ctx, txt);
     removeTyping();
     S.messages.push({role:"bot", text:reply});
