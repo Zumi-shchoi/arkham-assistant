@@ -307,7 +307,7 @@ const AI_CFG = {
     placeholder: "sk-proj-...",
   },
   gemini: {
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
     hint: '발급: <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a> → Get API key',
     placeholder: "AIza...",
   },
@@ -506,7 +506,7 @@ ${ctx}
       cleaned.push({role:"user", parts:[{text: userText}]});
     }
 
-    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="+encodeURIComponent(S.apiKey);
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="+encodeURIComponent(S.apiKey);
 
     // system_instruction 없이 첫 메시지에 시스템 내용 포함 (호환성 최대화)
     const body = cleaned.length === 1
