@@ -442,10 +442,8 @@ function retrieveCards(query) {
 }
 
 // AI 호출
-async function callAI(ctx) {
-  const apiMsgs = S.messages
-    .filter(m=>!m.isWelcome)
-    .map(m=>({role:m.role==="bot"?"assistant":"user",content:m.text}));
+async function callAI(ctx, userText) {
+  const hist = S.messages.filter(m=>!m.isWelcome).slice(0,-1);
 
   const system = `당신은 Arkham Horror: The Card Game 전문 AI 어시스턴트입니다.
 한국어로 답변하며 세 역할을 수행합니다: 카드 검색, 덱 빌딩 추천, 카드 효과 설명/비교.
@@ -459,45 +457,65 @@ ${ctx}
 규칙: 카드명은 한국어명(영문명) 형식. 수치 근거로 설명. 없는 카드 추측 금지.`;
 
   if (S.ai === "claude") {
+    const msgs = [
+      ...hist.map(m=>({role:m.role==="bot"?"assistant":"user",content:m.text})),
+      {role:"user",content:userText},
+    ];
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":S.apiKey,"anthropic-version":"2023-06-01"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system,messages:apiMsgs}),
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system,messages:msgs}),
     });
-    if(!res.ok) throw new Error(`Claude API 오류 ${res.status}`);
-    const d = await res.json();
-    return d.content?.[0]?.text || "응답 없음";
+    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error("Claude "+res.status+": "+(e?.error?.message||""));}
+    const d=await res.json();
+    return d.content?.[0]?.text||"응답 없음";
 
   } else if (S.ai === "openai") {
+    const msgs = [
+      {role:"system",content:system},
+      ...hist.map(m=>({role:m.role==="bot"?"assistant":"user",content:m.text})),
+      {role:"user",content:userText},
+    ];
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${S.apiKey}`},
-      body:JSON.stringify({model:"gpt-4o-mini",max_tokens:1000,messages:[{role:"system",content:system},...apiMsgs]}),
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+S.apiKey},
+      body:JSON.stringify({model:"gpt-4o-mini",max_tokens:1000,messages:msgs}),
     });
-    if(!res.ok) throw new Error(`OpenAI API 오류 ${res.status}`);
-    const d = await res.json();
-    return d.choices?.[0]?.message?.content || "응답 없음";
+    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error("OpenAI "+res.status+": "+(e?.error?.message||""));}
+    const d=await res.json();
+    return d.choices?.[0]?.message?.content||"응답 없음";
 
   } else {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(S.apiKey)}`;
-    const contents = apiMsgs.length > 0
-      ? apiMsgs.map(m=>({role:m.role==="assistant"?"model":"user",parts:[{text:m.content}]}))
-      : [{role:"user",parts:[{text:"안녕"}]}];
+    // Gemini: user/model 교대, 반드시 user로 끝나야 함
+    const raw = hist.map(m=>({role:m.role==="bot"?"model":"user",parts:[{text:m.text}]}));
+    const cleaned = [];
+    for (const msg of raw) {
+      if (cleaned.length===0 || cleaned[cleaned.length-1].role!==msg.role) cleaned.push(msg);
+    }
+    if (cleaned.length>0 && cleaned[cleaned.length-1].role==="model") cleaned.pop();
+    cleaned.push({role:"user",parts:[{text:userText}]});
+
+    const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(S.apiKey);
     const res = await fetch(url, {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         system_instruction:{parts:[{text:system}]},
-        contents,
+        contents:cleaned,
         generationConfig:{maxOutputTokens:1000},
       }),
     });
     if(!res.ok){
-      const errTxt = await res.text().catch(()=>"");
-      if(res.status===400)throw new Error("Gemini 400: API Key 오류 또는 요청 형식 문제");else if(res.status===403)throw new Error("Gemini 403: API Key 권한 없음 → aistudio.google.com에서 재발급");else if(res.status===404)throw new Error("Gemini 404: Generative Language API 미활성화 → Google Cloud Console에서 활성화 필요");else throw new Error("Gemini API 오류 "+res.status+": "+errTxt.slice(0,200));
+      const errTxt=await res.text().catch(()=>"");
+      let detail="";
+      try{detail=JSON.parse(errTxt)?.error?.message||"";}catch(e){detail=errTxt.slice(0,200);}
+      if(res.status===400) throw new Error("Gemini 400: "+detail);
+      if(res.status===403) throw new Error("Gemini 403: API Key 권한 없음 → aistudio.google.com 재발급");
+      if(res.status===404) throw new Error("Gemini 404: aistudio.google.com에서 발급한 Key를 사용하세요");
+      throw new Error("Gemini "+res.status+": "+detail);
     }
-    const d = await res.json();
-    return d.candidates?.[0]?.content?.parts?.[0]?.text || "응답 없음";
+    const d=await res.json();
+    return d.candidates?.[0]?.content?.parts?.[0]?.text||"응답 없음";
   }
 }
 
@@ -588,7 +606,7 @@ async function sendMsg(preset) {
   try {
     const rel = retrieveCards(txt);
     const ctx = rel.length>0 ? rel.map(cardSummary).join("\n") : "관련 카드 없음.";
-    const reply = await callAI(ctx);
+    const reply = await callAI(ctx, txt);
     removeTyping();
     S.messages.push({role:"bot", text:reply});
     appendMsg("bot", reply);
